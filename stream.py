@@ -2,7 +2,7 @@ import io
 import json
 import os
 from typing import Any
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+
 from reportlab.lib.styles import getSampleStyleSheet
 
 import numpy as np
