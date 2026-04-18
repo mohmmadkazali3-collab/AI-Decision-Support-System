@@ -2,8 +2,8 @@ import io
 import json
 import os
 from typing import Any
-
-
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
 
 import numpy as np
 import pandas as pd
@@ -16,8 +16,8 @@ except ImportError:
     genai = None
 
 # ─── HARDCODED API KEY ───────────────────────────────────────────────────────
-GEMINI_API_KEY = "AIzaSyCtUM4x2UuTSQHkRid-PvA-NXuSnNhMkmU"
-GEMINI_MODEL   = "gemini-2.0-flash"
+GEMINI_API_KEY = "AIzaSyBNm1Zzr0spNni05J860oqoZoh0EpGGJBU"
+GEMINI_MODEL   = "gemini-2.5-flash"
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(
