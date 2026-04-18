@@ -15,6 +15,10 @@ try:
 except ImportError:
     genai = None
 
+# ─── HARDCODED API KEY ───────────────────────────────────────────────────────
+GEMINI_API_KEY = "AIzaSyCtUM4x2UuTSQHkRid-PvA-NXuSnNhMkmU"
+GEMINI_MODEL   = "gemini-2.0-flash"
+# ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(
     page_title="AI Intelligence Dataset",
@@ -183,110 +187,13 @@ def get_dataset_kpis(df: pd.DataFrame, detected: dict[str, str | None]) -> dict[
     }
 
 
-def build_gemini_prompt(df: pd.DataFrame, detected: dict[str, str | None]) -> str:
-    numeric = infer_numeric_columns(df)
-    city = detected["city_col"]
-    price = detected["price_col"]
-    grouped = []
-    if city and price and city in df.columns and price in df.columns:
-        grouped = (
-            df.groupby(city)[price].mean().sort_values(ascending=False).head(12).reset_index().to_dict(orient="records")
-        )
-
-    payload = {
-        "shape": {"rows": int(df.shape[0]), "columns": int(df.shape[1])},
-        "columns": list(df.columns),
-        "dtypes": {k: str(v) for k, v in df.dtypes.to_dict().items()},
-        "summary_stats": df[numeric].describe().round(3).to_dict() if numeric else {},
-        "missing_values": {k: int(v) for k, v in df.isna().sum().to_dict().items()},
-        "detected_columns": detected,
-        "grouped_preview": grouped,
-        "sample_rows": df.head(12).to_dict(orient="records"),
-    }
-    return (
-        "You are a senior data scientist and BI strategist. "
-        "Analyze this dataset and output exactly these 4 sections:\n\n"
-        "1) Key insights\n"
-        "2) Trends\n"
-        "3) Anomalies\n"
-        "4) Business recommendations\n\n"
-        "Rules: keep it concise, data-grounded, and actionable. Max 5 bullets per section.\n\n"
-        f"DATA_JSON:\n{json.dumps(payload, ensure_ascii=False)}"
-    )
-
-
-def get_gemini_response(prompt: str, api_key: str, model_name: str = "gemini-1.5-flash") -> tuple[bool, str]:
-    if not api_key:
-        return False, "Gemini API key is required. Add it in the AI Insights tab."
-    if genai is None:
-        return False, "Package missing: install with `pip install google-generativeai`."
-
-    try:
-        genai.configure(api_key=api_key)
-        fallback_models = [
-            model_name,
-            "gemini-1.5-pro",
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-exp",
-            "gemini-1.0-pro",
-        ]
-        errors: list[str] = []
-
-        for candidate_model in list(dict.fromkeys(fallback_models)):
-            try:
-                model = genai.GenerativeModel(candidate_model)
-                response = model.generate_content(prompt)
-                text = getattr(response, "text", "")
-                if not text and getattr(response, "candidates", None):
-                    parts = response.candidates[0].content.parts
-                    text = "".join(getattr(part, "text", "") for part in parts)
-                if text:
-                    return True, text.strip()
-                errors.append(f"{candidate_model}: empty response")
-            except Exception as model_exc:
-                errors.append(f"{candidate_model}: {model_exc}")
-
-        return False, "All candidate Gemini models failed:\n- " + "\n- ".join(errors)
-    except Exception as exc:
-        return False, f"Gemini request failed: {exc}"
-
-
-def list_generate_models(api_key: str) -> list[str]:
-    if not api_key or genai is None:
-        return []
-    try:
-        genai.configure(api_key=api_key)
-        models: list[str] = []
-        for model in genai.list_models():
-            supported = getattr(model, "supported_generation_methods", []) or []
-            if "generateContent" in supported:
-                name = getattr(model, "name", "")
-                if name:
-                    models.append(name.replace("models/", ""))
-        return sorted(set(models))
-    except Exception:
-        return []
-
-
-def resolve_api_key() -> str:
-    """Resolve API key from session, Streamlit secrets, or environment."""
-    if st.session_state.get("gemini_key"):
-        return st.session_state["gemini_key"].strip()
-    try:
-        secret_key = st.secrets.get("GEMINI_API_KEY", "")
-        if secret_key:
-            return str(secret_key).strip()
-    except Exception:
-        pass
-    env_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or ""
-    return env_key.strip()
-
-
 def power_bi_suggestions(df: pd.DataFrame, detected: dict[str, str | None]) -> dict[str, Any]:
     numeric = infer_numeric_columns(df)
     categorical = infer_categorical_columns(df)
     dates = infer_date_columns(df)
-    has_geo = detected["city_col"] is not None or any(k in " ".join(df.columns).lower() for k in ["city", "country", "region", "location", "lat", "lon"])
+    has_geo = detected["city_col"] is not None or any(
+        k in " ".join(df.columns).lower() for k in ["city", "country", "region", "location", "lat", "lon"]
+    )
 
     dashboard_type = "Performance Dashboard"
     if dates and numeric:
@@ -310,7 +217,10 @@ def power_bi_suggestions(df: pd.DataFrame, detected: dict[str, str | None]) -> d
         dax.append(f"Total {col} = SUM('Table'[{col}])")
         dax.append(f"Avg {col} = AVERAGE('Table'[{col}])")
     if dates and numeric:
-        dax.append(f"MoM Change = DIVIDE([Total {numeric[0]}] - CALCULATE([Total {numeric[0]}], DATEADD('Date'[Date], -1, MONTH)), CALCULATE([Total {numeric[0]}], DATEADD('Date'[Date], -1, MONTH)))")
+        dax.append(
+            f"MoM Change = DIVIDE([Total {numeric[0]}] - CALCULATE([Total {numeric[0]}], "
+            f"DATEADD('Date'[Date], -1, MONTH)), CALCULATE([Total {numeric[0]}], DATEADD('Date'[Date], -1, MONTH)))"
+        )
 
     visuals = ["Bar chart", "Line chart", "KPI cards"]
     if has_geo:
@@ -341,7 +251,12 @@ def apply_filters(df: pd.DataFrame, detected: dict[str, str | None]) -> pd.DataF
     with c1:
         if city_col and city_col in out.columns:
             cities = sorted(out[city_col].dropna().astype(str).unique().tolist())
-            selected = st.multiselect("City / Location", options=cities, default=cities[: min(8, len(cities))], key=f"city_filter_{city_col}")
+            selected = st.multiselect(
+                "City / Location",
+                options=cities,
+                default=cities[: min(8, len(cities))],
+                key=f"city_filter_{city_col}",
+            )
             if selected:
                 out = out[out[city_col].astype(str).isin(selected)]
         else:
@@ -370,17 +285,28 @@ def apply_filters(df: pd.DataFrame, detected: dict[str, str | None]) -> pd.DataF
 
 
 def init_state() -> None:
-    if "datasets" not in st.session_state:
-        st.session_state.datasets = {}
-    if "selected_dataset" not in st.session_state:
-        st.session_state.selected_dataset = None
-    if "cleaning_reports" not in st.session_state:
-        st.session_state.cleaning_reports = {}
-    if "gemini_key" not in st.session_state:
-        st.session_state.gemini_key = ""
+    defaults = {
+        "datasets": {},
+        "selected_dataset": None,
+        "cleaning_reports": {},
+        "chat_history": [],
+    }
+    for key, val in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = val
 
 
 init_state()
+
+# ─── Configure Gemini once at startup ────────────────────────────────────────
+_gemini_model = None
+if genai is not None:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        _gemini_model = genai.GenerativeModel(GEMINI_MODEL)
+    except Exception as _cfg_err:
+        st.error(f"Gemini config error: {_cfg_err}")
+# ─────────────────────────────────────────────────────────────────────────────
 
 st.title("📊 AI Intelligence Dataset")
 st.caption("Upload, clean, compare, visualize, and generate AI insights from multiple datasets.")
@@ -409,9 +335,15 @@ with st.sidebar:
 
     names = list(st.session_state.datasets.keys())
     if names:
-        default_idx = names.index(st.session_state.selected_dataset) if st.session_state.selected_dataset in names else 0
+        default_idx = (
+            names.index(st.session_state.selected_dataset)
+            if st.session_state.selected_dataset in names
+            else 0
+        )
         st.session_state.selected_dataset = st.selectbox("Active dataset", options=names, index=default_idx)
-        selected_for_compare = st.multiselect("Datasets for comparison", options=names, default=names[: min(2, len(names))])
+        selected_for_compare = st.multiselect(
+            "Datasets for comparison", options=names, default=names[: min(2, len(names))]
+        )
     else:
         st.session_state.selected_dataset = None
         selected_for_compare = []
@@ -428,6 +360,7 @@ numeric_cols = infer_numeric_columns(active_df)
 
 tabs = st.tabs(["Overview", "Data Cleaning", "Comparison", "AI Insights", "Power BI Suggestions"])
 
+# ══════════════════════════════ TAB 0 – OVERVIEW ══════════════════════════════
 with tabs[0]:
     st.markdown('<div class="section-title">📊 Overview Dashboard</div>', unsafe_allow_html=True)
     st.write(f"Active dataset: `{active_name}`")
@@ -447,22 +380,36 @@ with tabs[0]:
 
     st.markdown('<div class="section-title">📈 Interactive Visuals</div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
-    price_col, rating_col, city_col, date_col = detected["price_col"], detected["rating_col"], detected["city_col"], detected["date_col"]
+    price_col  = detected["price_col"]
+    rating_col = detected["rating_col"]
+    city_col   = detected["city_col"]
+    date_col   = detected["date_col"]
 
     with c1:
         if price_col and price_col in filtered_df.columns:
             fig_hist = px.histogram(filtered_df, x=price_col, nbins=35, title=f"Histogram: {price_col}", template="plotly_dark")
             st.plotly_chart(fig_hist, use_container_width=True)
         if city_col and price_col and city_col in filtered_df.columns and price_col in filtered_df.columns:
-            grp = filtered_df.groupby(city_col)[price_col].mean().reset_index().sort_values(price_col, ascending=False).head(20)
+            grp = (
+                filtered_df.groupby(city_col)[price_col]
+                .mean()
+                .reset_index()
+                .sort_values(price_col, ascending=False)
+                .head(20)
+            )
             fig_bar = px.bar(grp, x=city_col, y=price_col, color=price_col, template="plotly_dark", title=f"Avg {price_col} by {city_col}")
             st.plotly_chart(fig_bar, use_container_width=True)
     with c2:
         if price_col and rating_col and price_col in filtered_df.columns and rating_col in filtered_df.columns:
-            fig_sc = px.scatter(filtered_df, x=price_col, y=rating_col, color=city_col if city_col in filtered_df.columns else None, template="plotly_dark", title=f"{price_col} vs {rating_col}")
+            fig_sc = px.scatter(
+                filtered_df, x=price_col, y=rating_col,
+                color=city_col if city_col and city_col in filtered_df.columns else None,
+                template="plotly_dark", title=f"{price_col} vs {rating_col}",
+            )
             st.plotly_chart(fig_sc, use_container_width=True)
         if city_col and rating_col and city_col in filtered_df.columns and rating_col in filtered_df.columns:
-            fig_box = px.box(filtered_df, x=city_col, y=rating_col, template="plotly_dark", title=f"Box: {rating_col} by {city_col}", points="outliers")
+            fig_box = px.box(filtered_df, x=city_col, y=rating_col, template="plotly_dark",
+                             title=f"Box: {rating_col} by {city_col}", points="outliers")
             st.plotly_chart(fig_box, use_container_width=True)
 
     if len(numeric_cols) >= 2:
@@ -504,6 +451,7 @@ with tabs[0]:
     except Exception as err:
         st.error(f"Could not render chart: {err}")
 
+# ══════════════════════════════ TAB 1 – DATA CLEANING ═════════════════════════
 with tabs[1]:
     st.markdown('<div class="section-title">🧹 Data Cleaning</div>', unsafe_allow_html=True)
     st.write(f"Cleaning dataset: `{active_name}`")
@@ -555,6 +503,7 @@ with tabs[1]:
     )
     st.caption("Exported file is ready for Power BI ingestion.")
 
+# ══════════════════════════════ TAB 2 – COMPARISON ════════════════════════════
 with tabs[2]:
     st.markdown('<div class="section-title">⚖️ Dataset Comparison Dashboard</div>', unsafe_allow_html=True)
     if len(selected_for_compare) < 2:
@@ -594,119 +543,135 @@ with tabs[2]:
                 [dfa[[metric]].assign(dataset=chosen[0]), dfb[[metric]].assign(dataset=chosen[1])],
                 ignore_index=True,
             )
-            fig_dist = px.histogram(comb, x=metric, color="dataset", barmode="overlay", opacity=0.65, template="plotly_dark", title=f"Distribution Comparison: {metric}")
+            fig_dist = px.histogram(comb, x=metric, color="dataset", barmode="overlay", opacity=0.65,
+                                    template="plotly_dark", title=f"Distribution Comparison: {metric}")
             st.plotly_chart(fig_dist, use_container_width=True)
 
-            fig_mean = px.bar(summary, x="dataset", y="mean", color="dataset", template="plotly_dark", title=f"Average {metric} by Dataset")
+            fig_mean = px.bar(summary, x="dataset", y="mean", color="dataset", template="plotly_dark",
+                              title=f"Average {metric} by Dataset")
             st.plotly_chart(fig_mean, use_container_width=True)
         else:
             st.warning("No common numeric columns found between selected datasets.")
 
+# ══════════════════════════════ TAB 3 – AI INSIGHTS ══════════════════════════
 with tabs[3]:
-    st.markdown('<div class="section-title">🤖 AI Insights (Auto + Chat)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">🤖 AI Insights (Gemini)</div>', unsafe_allow_html=True)
     st.write(f"**Analyze dataset:** `{active_name}`")
 
     if genai is None:
-        st.error("❌ google-generativeai not installed")
-    else:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        st.error("❌ google-generativeai not installed. Run: pip install google-generativeai")
+        st.stop()
 
-        # ---------------- AUTO ANALYSIS ----------------
-        st.subheader("📊 Automatic Analysis")
+    if _gemini_model is None:
+        st.error("❌ Gemini model could not be initialised. Check your API key.")
+        st.stop()
 
-        try:
-            sample_data = active_df.head(15).to_string()
+    # ── Automatic Analysis ───────────────────────────────────────────────────
+    st.subheader("📊 Automatic Analysis")
 
-            auto_prompt = f"""
-            You are a professional business analyst.
+    sample_data = active_df.head(15).to_string()
 
-            Analyze this dataset and provide:
-            - Key insights
-            - Trends
-            - Problems
-            - Recommendations
+    auto_prompt = f"""You are a professional business analyst.
 
-            Data:
-            {sample_data}
-            """
+Analyze this dataset and provide:
+- Key insights
+- Trends
+- Problems
+- Recommendations
 
-            auto_response = model.generate_content(auto_prompt)
+Data:
+{sample_data}
+"""
 
-            st.success(auto_response.text)
+    auto_insights_key = f"auto_insights_{active_name}"
 
-        except Exception as e:
-            st.error(f"AI Error: {e}")
-
-        # ---------------- CHAT ----------------
-        st.subheader("💬 Chat with Data")
-
-        if "chat_history" not in st.session_state:
-            st.session_state.chat_history = []
-
-        user_question = st.text_input("Ask anything about your data:")
-
-        if user_question:
-            st.session_state.chat_history.append(("You", user_question))
-
+    if auto_insights_key not in st.session_state:
+        with st.spinner("Generating AI insights…"):
             try:
-                chat_prompt = f"""
-                Dataset:
-                {sample_data}
+                auto_response = _gemini_model.generate_content(auto_prompt)
+                st.session_state[auto_insights_key] = auto_response.text
+            except Exception as e:
+                st.session_state[auto_insights_key] = f"__ERROR__: {e}"
 
-                Question:
-                {user_question}
+    cached = st.session_state[auto_insights_key]
+    if cached.startswith("__ERROR__:"):
+        st.error(cached.replace("__ERROR__: ", ""))
+    else:
+        st.success(cached)
 
-                Answer clearly with insights.
-                """
+    if st.button("🔄 Refresh Analysis"):
+        if auto_insights_key in st.session_state:
+            del st.session_state[auto_insights_key]
+        st.rerun()
 
-                response = model.generate_content(chat_prompt)
+    # ── Chat with Data ───────────────────────────────────────────────────────
+    st.subheader("💬 Chat with Data")
 
+    user_question = st.text_input("Ask anything about your data:", key="chat_input")
+
+    if st.button("Send", key="chat_send") and user_question.strip():
+        st.session_state.chat_history.append(("You", user_question.strip()))
+
+        chat_prompt = f"""Dataset:
+{sample_data}
+
+Question:
+{user_question}
+
+Answer clearly with insights.
+"""
+        with st.spinner("Thinking…"):
+            try:
+                response = _gemini_model.generate_content(chat_prompt)
                 st.session_state.chat_history.append(("AI", response.text))
-
             except Exception as e:
                 st.session_state.chat_history.append(("AI", f"Error: {e}"))
 
-        # عرض الشات
-        for role, msg in st.session_state.chat_history:
-            if role == "You":
-                st.markdown(f"**🧑 You:** {msg}")
-            else:
-                st.markdown(f"**🤖 AI:** {msg}")
+    for role, msg in reversed(st.session_state.chat_history):
+        if role == "You":
+            st.markdown(f"**🧑 You:** {msg}")
+        else:
+            st.markdown(f"**🤖 AI:** {msg}")
 
-        # ---------------- PDF ----------------
-        st.subheader("📄 Generate Report")
+    # ── PDF Report ───────────────────────────────────────────────────────────
+    st.subheader("📄 Generate Report")
 
-        if st.button("Generate Full Report PDF"):
-
+    if st.button("Generate Full Report PDF"):
+        insights_text = st.session_state.get(auto_insights_key, "No insights generated yet.")
+        if insights_text.startswith("__ERROR__:"):
+            st.error("Cannot generate PDF — AI insights not available.")
+        else:
             try:
-                buffer = io.BytesIO()
-                doc = SimpleDocTemplate(buffer)
+                pdf_buffer = io.BytesIO()
+                doc = SimpleDocTemplate(pdf_buffer)
                 styles = getSampleStyleSheet()
-
                 elements = []
 
-                elements.append(Paragraph("AI Business Report", styles['Title']))
+                elements.append(Paragraph("AI Business Report", styles["Title"]))
+                elements.append(Spacer(1, 20))
+                elements.append(Paragraph("Dataset Summary:", styles["Heading2"]))
+
+                # Convert describe() to a safe string for ReportLab
+                summary_text = active_df.describe().to_string().replace("<", "&lt;").replace(">", "&gt;")
+                elements.append(Paragraph(f"<pre>{summary_text}</pre>", styles["Code"]))
                 elements.append(Spacer(1, 20))
 
-                elements.append(Paragraph("Dataset Summary:", styles['Heading2']))
-                elements.append(Paragraph(str(active_df.describe()), styles['Normal']))
-                elements.append(Spacer(1, 20))
-
-                elements.append(Paragraph("AI Insights:", styles['Heading2']))
-                elements.append(Paragraph(auto_response.text, styles['Normal']))
+                elements.append(Paragraph("AI Insights:", styles["Heading2"]))
+                safe_insights = insights_text.replace("<", "&lt;").replace(">", "&gt;")
+                elements.append(Paragraph(safe_insights, styles["Normal"]))
 
                 doc.build(elements)
 
                 st.download_button(
                     label="📥 Download Report",
-                    data=buffer.getvalue(),
+                    data=pdf_buffer.getvalue(),
                     file_name="AI_Report.pdf",
-                    mime="application/pdf"
+                    mime="application/pdf",
                 )
-
             except Exception as e:
                 st.error(f"PDF Error: {e}")
 
+# ══════════════════════════════ TAB 4 – POWER BI ═════════════════════════════
 with tabs[4]:
     st.markdown('<div class="section-title">📊 Suggested Power BI Dashboard</div>', unsafe_allow_html=True)
     suggestion = power_bi_suggestions(active_df, detected)
