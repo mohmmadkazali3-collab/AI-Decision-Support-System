@@ -16,7 +16,7 @@ except ImportError:
     genai = None
 
 # ─── HARDCODED API KEY ───────────────────────────────────────────────────────
-GEMINI_API_KEY = "AIzaSyCtUM4x2UuTSQHkRid-PvA-NXuSnNhMkmU"
+GEMINI_API_KEY = "AIzaSyAUPCeAD2VipoFJR9bP5BjwF1rfrTnCexs"
 GEMINI_MODEL   = "gemini-2.0-flash"
 # ─────────────────────────────────────────────────────────────────────────────
 
